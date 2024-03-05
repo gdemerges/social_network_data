@@ -6,14 +6,8 @@
 </head>
 <body>
     <h1>Statistiques de mes messages Messenger</h1>
-    <div id="stats"></div>
-
-    <script>
-        fetch('/api/statistiques')
-        .then(response => response.json())
-        .then(data => {
-            document.getElementById('stats').innerHTML = `Nombre total de messages : ${data.nombre_messages}`;
-        });
-    </script>
+    <div id="stats">
+        Nombre total de messages : {{ stats.nombre_messages }}
+    </div>
 </body>
 </html>
