@@ -1,0 +1,4 @@
+*.DS_Store
+__pycache__
+message_1.json
+message_1_utf8.json
