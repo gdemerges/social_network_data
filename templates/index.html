@@ -2,12 +2,20 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Statistiques Messenger</title>
+    <title>Statistiques des Messages</title>
 </head>
 <body>
-    <h1>Statistiques de mes messages Messenger</h1>
-    <div id="stats">
-        Nombre total de messages : {{ stats.nombre_messages }}
+    <h1>Statistiques des Messages</h1>
+    <div>
+        <h2>Nombre total de messages : {{ stats['nombre_messages'] }}</h2>
+    </div>
+    <div>
+        <h2>Messages par personne :</h2>
+        <ul>
+            {% for sender, count in stats_message.items() %}
+            <li>{{ sender }}: {{ count }}</li>
+            {% endfor %}
+        </ul>
     </div>
 </body>
 </html>
