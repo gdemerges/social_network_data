@@ -1,0 +1,14 @@
+# Social Network Data Analyzer
+# Dashboard
+dash>=2.14.0
+dash-bootstrap-components>=1.5.0
+plotly>=5.18.0
+pandas>=2.0.0
+textblob>=0.17.1
+
+# RAG & LLM
+chromadb>=0.4.22
+requests>=2.31.0
+
+# Embeddings (utilisé par ChromaDB)
+sentence-transformers>=2.2.2
