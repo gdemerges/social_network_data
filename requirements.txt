@@ -1,4 +1,6 @@
-# Social Network Data Analyzer
+# Social Network Data Analyzer - Production RAG
+# =============================================
+
 # Dashboard
 dash>=2.14.0
 dash-bootstrap-components>=1.5.0
@@ -6,9 +8,23 @@ plotly>=5.18.0
 pandas>=2.0.0
 textblob>=0.17.1
 
-# RAG & LLM
+# RAG Core
 chromadb>=0.4.22
 requests>=2.31.0
 
-# Embeddings (utilisé par ChromaDB)
+# Embeddings & Re-ranking
 sentence-transformers>=2.2.2
+# Le modèle cross-encoder sera téléchargé automatiquement:
+# cross-encoder/ms-marco-MiniLM-L-6-v2
+
+# Évaluation RAG (optionnel mais recommandé)
+# ragas>=0.1.0  # Décommenter pour métriques RAGAS officielles
+# giskard>=2.0.0  # Décommenter pour tests ML
+# trulens-eval>=0.20.0  # Décommenter pour évaluation TruLens
+
+# Ingestion avancée (optionnel)
+# llama-parse>=0.3.0  # Décommenter pour parsing PDF/docs avancé
+# unstructured>=0.10.0  # Décommenter pour parsing multi-format
+# python-docx>=1.0.0  # Décommenter pour fichiers Word
+# PyPDF2>=3.0.0  # Décommenter pour fichiers PDF
+# pytesseract>=0.3.10  # Décommenter pour OCR
