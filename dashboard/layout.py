@@ -217,7 +217,7 @@ def create_chat_section() -> html.Div:
         # Loading
         dcc.Loading(
             id='loading-chat',
-            type='dots',
+            type='dot',
             color=COLORS['primary'],
             children=html.Div(id='chat-loading-output')
         ),
