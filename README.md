@@ -57,7 +57,7 @@ curl http://localhost:11434/api/tags
 
 4. **Lancer l'application**
 ```bash
-python -m social_network_data
+python __main__.py
 ```
 
 Puis ouvrez `http://localhost:8050` dans votre navigateur.
