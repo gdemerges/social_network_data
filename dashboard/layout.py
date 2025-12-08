@@ -59,11 +59,12 @@ def create_upload_section() -> html.Div:
             id='upload-data',
             children=html.Div([
                 html.Div("📂", style=UPLOAD_ICON_STYLE),
-                html.Div("Glissez votre fichier JSON ici", style=UPLOAD_TEXT_STYLE),
+                html.Div("Glissez votre fichier ici (JSON, CSV, TXT)", style=UPLOAD_TEXT_STYLE),
                 html.Div("ou cliquez pour sélectionner", style=UPLOAD_SUBTEXT_STYLE),
             ]),
             style=UPLOAD_ZONE_STYLE,
-            multiple=False
+            multiple=False,
+            accept='.json,.csv,.txt'
         ),
         dcc.Store(id='stored-data'),
         html.Div(id='output-data-upload'),

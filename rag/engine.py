@@ -283,22 +283,44 @@ class RAGEngine:
                 "retrieval_method": "none"
             }
         
-        context = "\n".join([f"- {msg['content']}" for msg in relevant_messages])
+        # Formater le contexte avec les noms des expéditeurs
+        context_parts = []
+        for msg in relevant_messages:
+            sender = msg['metadata'].get('sender_name', 'Inconnu')
+            content = msg['content']
+            context_parts.append(f"[{sender}]: {content}")
+        
+        context = "\n".join(context_parts)
         
         system_prompt = """Tu es un assistant qui analyse des conversations de messagerie.
 Tu réponds toujours en français.
-Tu dois répondre aux questions en te basant UNIQUEMENT sur les messages fournis dans le contexte.
-Si tu ne peux pas répondre avec les informations disponibles, dis-le clairement.
-Sois concis et précis dans tes réponses.
-Ne fabrique pas d'informations qui ne sont pas dans le contexte."""
 
-        user_prompt = f"""Voici des messages de conversation pertinents pour répondre à la question:
+RÈGLES STRICTES:
+1. Base-toi UNIQUEMENT sur les messages fournis dans le contexte
+2. Fais TRÈS attention à QUI dit QUOI - ne confonds JAMAIS les personnes
+3. Cite EXACTEMENT les passages pertinents avec le nom de la personne qui parle
+4. Si une information n'est pas claire ou absente, dis-le explicitement
+5. Ne fais AUCUNE inférence ou supposition au-delà de ce qui est écrit
+6. Quand tu mentionnes une personne, vérifie DEUX FOIS que c'est bien elle qui a dit/fait cette chose
 
+Format de réponse attendu:
+- Réponds directement à la question
+- Cite les messages avec le format: "[Nom]: message exact"
+- Si plusieurs personnes sont concernées, liste-les clairement"""
+
+        user_prompt = f"""Voici des messages de conversation pertinents pour répondre à la question.
+Chaque message est au format [Nom de la personne]: contenu du message
+
+MESSAGES:
 {context}
 
-Question: {question}
+QUESTION: {question}
 
-Réponds à la question en te basant uniquement sur ces messages. Cite les passages pertinents."""
+CONSIGNES:
+- Lis attentivement QUI dit QUOI dans chaque message
+- Réponds en citant les messages exacts avec [Nom]: "citation"
+- Ne confonds pas les personnes - vérifie bien qui parle
+- Si plusieurs personnes sont concernées, liste-les toutes clairement"""
 
         answer = self.llm_client.generate(user_prompt, system_prompt)
         

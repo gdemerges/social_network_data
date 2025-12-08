@@ -54,7 +54,7 @@ def register_data_callback(app):
             raise PreventUpdate
 
         # Traiter les données
-        data = decode_upload_content(content)
+        data = decode_upload_content(content, filename)
         messages = process_messages(data)
         
         # Indexer dans le RAG
@@ -199,11 +199,19 @@ def register_chat_callback(app):
             # Ajouter les sources
             if result.get('sources'):
                 sources_text = "\n\n📚 **Sources utilisées:**\n"
-                for src in result['sources'][:3]:
-                    content_preview = src['metadata'].get('original_content', '')[:100]
+                for i, src in enumerate(result['sources'][:3], 1):
+                    # Récupérer le contenu du message
+                    content = src.get('content', '')
+                    sender = src.get('metadata', {}).get('sender_name', 'Inconnu')
+                    
+                    # Limiter la longueur
+                    content_preview = content[:150] if len(content) > 150 else content
+                    
                     if content_preview:
-                        sources_text += f"- {content_preview}...\n"
-                assistant_response += sources_text
+                        sources_text += f"{i}. **[{sender}]**: {content_preview}{'...' if len(content) > 150 else ''}\n"
+                
+                if sources_text != "\n\n📚 **Sources utilisées:**\n":
+                    assistant_response += sources_text
         
         # Réponse assistant
         chat_history.append({
