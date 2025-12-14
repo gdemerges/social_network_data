@@ -263,6 +263,111 @@ class RAGEngine:
             # Recherche vectorielle simple
             return self.vector_store.search(query, n_results)
     
+    def _detect_statistical_question(self, question: str) -> Optional[Dict]:
+        """
+        Détecte si la question nécessite une analyse statistique.
+        
+        Returns:
+            Dict avec le type d'analyse et les paramètres, ou None
+        """
+        question_lower = question.lower()
+        
+        # Patterns de questions statistiques
+        statistical_patterns = [
+            ("plus parlé", "message_count"),
+            ("le plus de messages", "message_count"),
+            ("combien de messages", "message_count"),
+            ("qui parle le plus", "message_count"),
+            ("le plus actif", "message_count"),
+            ("la plus active", "message_count"),
+            ("nombre de messages", "message_count"),
+        ]
+        
+        # Détection de période temporelle
+        months = {
+            "janvier": 1, "février": 2, "mars": 3, "avril": 4,
+            "mai": 5, "juin": 6, "juillet": 7, "août": 8,
+            "septembre": 9, "octobre": 10, "novembre": 11, "décembre": 12
+        }
+        
+        detected_month = None
+        for month_name, month_num in months.items():
+            if month_name in question_lower:
+                detected_month = (month_name, month_num)
+                break
+        
+        for pattern, analysis_type in statistical_patterns:
+            if pattern in question_lower:
+                return {
+                    "type": analysis_type,
+                    "month": detected_month,
+                    "question": question
+                }
+        
+        return None
+    
+    def _analyze_statistics(self, analysis_request: Dict) -> str:
+        """
+        Analyse les statistiques sur les messages bruts.
+        """
+        if self.messages_df is None or len(self.messages_df) == 0:
+            return "Aucune donnée n'est chargée pour effectuer cette analyse."
+        
+        df = self.messages_df.copy()
+        
+        # Filtrer par mois si demandé
+        month_info = analysis_request.get("month")
+        if month_info:
+            month_name, month_num = month_info
+            # S'assurer que la colonne date existe
+            if 'date' in df.columns:
+                df['month'] = pd.to_datetime(df['date']).dt.month
+                df_filtered = df[df['month'] == month_num]
+                
+                if len(df_filtered) == 0:
+                    # Vérifier quels mois sont disponibles
+                    available_months = df['month'].unique()
+                    month_names = {1: "janvier", 2: "février", 3: "mars", 4: "avril",
+                                   5: "mai", 6: "juin", 7: "juillet", 8: "août",
+                                   9: "septembre", 10: "octobre", 11: "novembre", 12: "décembre"}
+                    available = [month_names.get(m, str(m)) for m in sorted(available_months)]
+                    return f"❌ Aucun message trouvé pour {month_name}.\n\n📅 Mois disponibles dans les données : {', '.join(available)}"
+                
+                df = df_filtered
+                period_text = f"en {month_name}"
+            else:
+                period_text = "(toute la période)"
+        else:
+            period_text = "(toute la période)"
+        
+        # Analyse selon le type
+        if analysis_request["type"] == "message_count":
+            # Compter les messages par personne
+            sender_counts = df['sender_name'].value_counts()
+            
+            if len(sender_counts) == 0:
+                return "Aucun message à analyser."
+            
+            top_sender = sender_counts.index[0]
+            top_count = sender_counts.iloc[0]
+            total_messages = len(df)
+            
+            # Construire la réponse
+            response = f"📊 **Statistiques des messages {period_text}**\n\n"
+            response += f"🏆 **{top_sender}** a le plus parlé avec **{top_count} messages** ({top_count/total_messages*100:.1f}% du total)\n\n"
+            response += f"**Classement complet :**\n"
+            
+            for i, (sender, count) in enumerate(sender_counts.head(10).items(), 1):
+                emoji = "🥇" if i == 1 else ("🥈" if i == 2 else ("🥉" if i == 3 else f"{i}."))
+                percentage = count / total_messages * 100
+                response += f"{emoji} **{sender}**: {count} messages ({percentage:.1f}%)\n"
+            
+            response += f"\n📈 **Total**: {total_messages} messages {period_text}"
+            
+            return response
+        
+        return "Type d'analyse non reconnu."
+    
     def chat(self, question: str, n_context: int = 5) -> Dict:
         """
         Répond à une question en utilisant le RAG.
@@ -274,6 +379,16 @@ class RAGEngine:
         Returns:
             Dict avec la réponse et les sources
         """
+        # Vérifier si c'est une question statistique
+        stat_analysis = self._detect_statistical_question(question)
+        if stat_analysis:
+            answer = self._analyze_statistics(stat_analysis)
+            return {
+                "answer": answer,
+                "sources": [],
+                "retrieval_method": "statistical_analysis"
+            }
+        
         relevant_messages = self.search(question, n_results=n_context)
         
         if not relevant_messages:
@@ -283,14 +398,22 @@ class RAGEngine:
                 "retrieval_method": "none"
             }
         
-        # Formater le contexte avec les noms des expéditeurs
+        # Formater le contexte selon le type de chunk
         context_parts = []
-        for msg in relevant_messages:
-            sender = msg['metadata'].get('sender_name', 'Inconnu')
+        for i, msg in enumerate(relevant_messages, 1):
+            metadata = msg['metadata']
             content = msg['content']
-            context_parts.append(f"[{sender}]: {content}")
+            
+            if metadata.get('chunk_type') == 'conversation_window':
+                # Chunk de fenêtre de conversation - le contenu contient déjà les [Nom]: message
+                senders = metadata.get('senders', 'Inconnu')
+                context_parts.append(f"--- Extrait {i} (Participants: {senders}) ---\n{content}")
+            else:
+                # Message individuel
+                sender = metadata.get('sender_name', 'Inconnu')
+                context_parts.append(f"[{sender}]: {content}")
         
-        context = "\n".join(context_parts)
+        context = "\n\n".join(context_parts)
         
         system_prompt = """Tu es un assistant qui analyse des conversations de messagerie.
 Tu réponds toujours en français.
@@ -303,26 +426,27 @@ RÈGLES STRICTES:
 5. Ne fais AUCUNE inférence ou supposition au-delà de ce qui est écrit
 6. Quand tu mentionnes une personne, vérifie DEUX FOIS que c'est bien elle qui a dit/fait cette chose
 
-Format de réponse attendu:
-- Réponds directement à la question
-- Cite les messages avec le format: "[Nom]: message exact"
-- Si plusieurs personnes sont concernées, liste-les clairement"""
+IMPORTANT:
+- Les extraits peuvent contenir plusieurs messages de différentes personnes
+- Chaque message est au format [Nom]: contenu
+- Réponds de manière claire et structurée
+- NE liste PAS tous les messages - fais une SYNTHÈSE pertinente
 
-        user_prompt = f"""Voici des messages de conversation pertinents pour répondre à la question.
-Chaque message est au format [Nom de la personne]: contenu du message
+Format de réponse:
+- Réponds directement et de manière concise
+- Cite uniquement les messages les plus pertinents (2-3 max)
+- Utilise des bullet points si plusieurs éléments de réponse"""
 
-MESSAGES:
+        user_prompt = f"""Voici des extraits de conversation pertinents pour répondre à la question.
+
+EXTRAITS:
 {context}
 
 QUESTION: {question}
 
-CONSIGNES:
-- Lis attentivement QUI dit QUOI dans chaque message
-- Réponds en citant les messages exacts avec [Nom]: "citation"
-- Ne confonds pas les personnes - vérifie bien qui parle
-- Si plusieurs personnes sont concernées, liste-les toutes clairement"""
+Réponds de manière synthétique et structurée. Ne recopie pas tous les messages, extrais seulement l'information pertinente."""
 
-        answer = self.llm_client.generate(user_prompt, system_prompt)
+        answer = self.llm_client.generate(user_prompt, system_prompt, max_tokens=3000)
         
         # Déterminer la méthode de retrieval utilisée
         retrieval_method = "hybrid" if self.use_hybrid_search else "vector"

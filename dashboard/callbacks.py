@@ -196,21 +196,37 @@ def register_chat_callback(app):
             result = rag.chat(user_input)
             assistant_response = result['answer']
             
-            # Ajouter les sources
-            if result.get('sources'):
-                sources_text = "\n\n📚 **Sources utilisées:**\n"
+            # Ajouter les sources (seulement pour les réponses RAG, pas statistiques)
+            if result.get('sources') and result.get('retrieval_method') != 'statistical_analysis':
+                sources_text = "\n\n---\n📚 **Extraits de conversation utilisés:**\n"
                 for i, src in enumerate(result['sources'][:3], 1):
-                    # Récupérer le contenu du message
                     content = src.get('content', '')
-                    sender = src.get('metadata', {}).get('sender_name', 'Inconnu')
+                    metadata = src.get('metadata', {})
                     
-                    # Limiter la longueur
-                    content_preview = content[:150] if len(content) > 150 else content
-                    
-                    if content_preview:
-                        sources_text += f"{i}. **[{sender}]**: {content_preview}{'...' if len(content) > 150 else ''}\n"
+                    # Pour les chunks de fenêtre, utiliser 'senders' au lieu de 'sender_name'
+                    if metadata.get('chunk_type') == 'conversation_window':
+                        senders = metadata.get('senders', 'Inconnu')
+                        start_date = metadata.get('start_date', '')
+                        end_date = metadata.get('end_date', '')
+                        date_info = f"{start_date}" if start_date == end_date else f"{start_date} → {end_date}"
+                        
+                        # Limiter la longueur et nettoyer le contenu
+                        content_preview = content[:200] if len(content) > 200 else content
+                        content_preview = content_preview.replace('\n', ' • ')
+                        
+                        sources_text += f"\n**{i}. Conversation** ({date_info})\n"
+                        sources_text += f"   Participants: {senders}\n"
+                        sources_text += f"   > {content_preview}{'...' if len(content) > 200 else ''}\n"
+                    else:
+                        # Messages individuels
+                        sender = metadata.get('sender_name', 'Inconnu')
+                        date = metadata.get('date', '')
+                        content_preview = content[:150] if len(content) > 150 else content
+                        
+                        sources_text += f"\n**{i}. [{sender}]** ({date})\n"
+                        sources_text += f"   > {content_preview}{'...' if len(content) > 150 else ''}\n"
                 
-                if sources_text != "\n\n📚 **Sources utilisées:**\n":
+                if len(result['sources']) > 0:
                     assistant_response += sources_text
         
         # Réponse assistant
