@@ -5,25 +5,34 @@ Module de stockage vectoriel avec ChromaDB.
 import chromadb
 from typing import List, Dict, Optional
 import hashlib
+import os
 
 
 class VectorStore:
     """Gère le stockage et la recherche vectorielle avec ChromaDB."""
-    
+
     def __init__(
         self,
         collection_name: str = "messages",
-        embedding_function=None
+        embedding_function=None,
+        persist_directory: str = "./chroma_db"
     ):
         """
         Initialise le store vectoriel.
-        
+
         Args:
             collection_name: Nom de la collection
             embedding_function: Fonction d'embedding à utiliser
+            persist_directory: Répertoire de persistance des données
         """
         self.collection_name = collection_name
-        self.client = chromadb.Client()
+        self.persist_directory = persist_directory
+
+        # Créer le répertoire s'il n'existe pas
+        os.makedirs(persist_directory, exist_ok=True)
+
+        # Utiliser PersistentClient pour sauvegarder les données
+        self.client = chromadb.PersistentClient(path=persist_directory)
         self.embedding_function = embedding_function
         
         self.collection = self.client.get_or_create_collection(

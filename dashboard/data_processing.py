@@ -10,6 +10,10 @@ from datetime import datetime
 from textblob import TextBlob
 
 
+# Limite de taille de fichier en bytes (100MB)
+MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024  # 100 MB
+
+
 def parse_whatsapp_format(text: str) -> list:
     """
     Parse un export WhatsApp au format [date heure] Nom: message.
@@ -62,17 +66,57 @@ def parse_whatsapp_format(text: str) -> list:
     return messages
 
 
+def validate_file_size(content: str) -> tuple[bool, str]:
+    """
+    Valide la taille du fichier uploadé.
+
+    Args:
+        content: Contenu base64 du fichier
+
+    Returns:
+        Tuple (is_valid, error_message)
+    """
+    try:
+        # Le contenu est au format "data:type;base64,content"
+        if ',' in content:
+            content_string = content.split(',', 1)[1]
+        else:
+            content_string = content
+
+        # Calculer la taille approximative du fichier décodé
+        # Base64 encode augmente la taille de ~33%, donc on divise par 1.33
+        encoded_size = len(content_string)
+        decoded_size = (encoded_size * 3) // 4
+
+        if decoded_size > MAX_FILE_SIZE_BYTES:
+            size_mb = decoded_size / (1024 * 1024)
+            max_mb = MAX_FILE_SIZE_BYTES / (1024 * 1024)
+            return False, f"❌ Fichier trop volumineux: {size_mb:.1f}MB. Limite: {max_mb:.0f}MB"
+
+        return True, ""
+    except Exception as e:
+        return False, f"❌ Erreur lors de la validation de la taille: {str(e)}"
+
+
 def decode_upload_content(content: str, filename: str = None) -> dict:
     """
     Décode le contenu uploadé en base64.
-    
+
     Args:
         content: Contenu base64 du fichier
         filename: Nom du fichier pour déterminer le format
-        
+
     Returns:
         Données décodées (dict pour JSON, DataFrame converti en dict pour CSV/TXT)
+
+    Raises:
+        ValueError: Si le fichier est trop volumineux
     """
+    # Valider la taille du fichier avant de le décoder
+    is_valid, error_msg = validate_file_size(content)
+    if not is_valid:
+        raise ValueError(error_msg)
+
     content_type, content_string = content.split(',')
     decoded = base64.b64decode(content_string)
     decoded_str = decoded.decode('utf-8')

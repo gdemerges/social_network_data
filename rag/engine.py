@@ -3,6 +3,7 @@ Moteur RAG principal - orchestre chunking, embeddings, retrieval hybride et éva
 """
 
 import pandas as pd
+import threading
 from typing import Dict, Optional, List
 
 from .chunking import TextChunker
@@ -546,13 +547,26 @@ Réponds de manière synthétique et structurée. Ne recopie pas tous les messag
         return self.llm_client.check_status()
 
 
-# Singleton
+# Singleton avec thread-safety
 _rag_instance: Optional[RAGEngine] = None
+_rag_lock = threading.Lock()
 
 
 def get_rag_engine() -> RAGEngine:
-    """Retourne l'instance singleton du RAG."""
+    """
+    Retourne l'instance singleton du RAG (thread-safe).
+
+    Utilise le pattern double-checked locking pour optimiser les performances
+    tout en garantissant la thread-safety.
+    """
     global _rag_instance
+
+    # Premier check (sans lock pour performance)
     if _rag_instance is None:
-        _rag_instance = RAGEngine()
+        # Acquérir le lock uniquement si l'instance n'existe pas
+        with _rag_lock:
+            # Deuxième check (avec lock pour thread-safety)
+            if _rag_instance is None:
+                _rag_instance = RAGEngine()
+
     return _rag_instance

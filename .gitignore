@@ -1,3 +1,10 @@
 *.json
 __pycache__
 *.DS_Store
+.claude
+
+# Variables d'environnement
+.env
+
+# Base de données ChromaDB persistante
+chroma_db/

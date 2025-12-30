@@ -3,6 +3,7 @@ Social Network Data Analyzer - Application principale.
 Dashboard pour analyser les messages avec RAG et LLM local.
 """
 
+import os
 import dash
 import dash_bootstrap_components as dbc
 
@@ -16,10 +17,10 @@ def create_app() -> dash.Dash:
         external_stylesheets=[dbc.themes.BOOTSTRAP],
         title="Analyseur de Messages"
     )
-    
+
     application.layout = create_layout()
     register_callbacks(application)
-    
+
     return application
 
 
@@ -27,4 +28,9 @@ app = create_app()
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Utiliser variable d'environnement pour le mode debug (par défaut: False)
+    debug_mode = os.getenv('DEBUG', 'False').lower() in ('true', '1', 'yes')
+    port = int(os.getenv('PORT', '8050'))
+    host = os.getenv('HOST', '127.0.0.1')
+
+    app.run(debug=debug_mode, host=host, port=port)

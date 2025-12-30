@@ -2,6 +2,7 @@
 Callbacks du dashboard Dash - Version Dark Theme.
 """
 
+import json
 from dash import html, dcc
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
@@ -53,20 +54,60 @@ def register_data_callback(app):
         if content is None:
             raise PreventUpdate
 
-        # Traiter les données
-        data = decode_upload_content(content, filename)
-        messages = process_messages(data)
-        
-        # Indexer dans le RAG
-        rag = get_rag_engine()
-        indexed_count = rag.index_messages(messages)
-        
-        # Statistiques RAG
-        _ = rag.get_stats()  # Pour vérification interne
-        rag_status = html.Div([
-            dbc.Badge("✅ RAG Actif", color="success", className="me-2"),
-            html.Small(f"{indexed_count} chunks indexés", style={'color': COLORS['text_muted']})
-        ], style={'display': 'flex', 'alignItems': 'center', 'gap': '10px'})
+        try:
+            # Traiter les données
+            data = decode_upload_content(content, filename)
+            messages = process_messages(data)
+
+            # Indexer dans le RAG
+            rag = get_rag_engine()
+            indexed_count = rag.index_messages(messages)
+
+            # Statistiques RAG
+            _ = rag.get_stats()  # Pour vérification interne
+            rag_status = html.Div([
+                dbc.Badge("✅ RAG Actif", color="success", className="me-2"),
+                html.Small(f"{indexed_count} chunks indexés", style={'color': COLORS['text_muted']})
+            ], style={'display': 'flex', 'alignItems': 'center', 'gap': '10px'})
+
+        except ValueError as e:
+            # Erreur de validation (ex: taille de fichier)
+            error_msg = str(e)
+            return (
+                {}, {}, {},  # Graphiques vides
+                [],  # Options dropdown
+                None,  # stored-data
+                html.Div([
+                    dbc.Badge("❌ Erreur", color="danger", className="me-2"),
+                    html.Small(error_msg, style={'color': '#ef4444'})
+                ], style={'display': 'flex', 'alignItems': 'center', 'gap': '10px'}),
+                "0", "0", "0", "N/A"  # Stats par défaut
+            )
+        except json.JSONDecodeError:
+            error_msg = "❌ Format JSON invalide. Vérifiez que votre fichier est bien formaté."
+            return (
+                {}, {}, {},
+                [],
+                None,
+                html.Div([
+                    dbc.Badge("❌ Erreur", color="danger", className="me-2"),
+                    html.Small(error_msg, style={'color': '#ef4444'})
+                ], style={'display': 'flex', 'alignItems': 'center', 'gap': '10px'}),
+                "0", "0", "0", "N/A"
+            )
+        except Exception as e:
+            # Erreur générique
+            error_msg = f"❌ Erreur lors du traitement: {str(e)[:100]}"
+            return (
+                {}, {}, {},
+                [],
+                None,
+                html.Div([
+                    dbc.Badge("❌ Erreur", color="danger", className="me-2"),
+                    html.Small(error_msg, style={'color': '#ef4444'})
+                ], style={'display': 'flex', 'alignItems': 'center', 'gap': '10px'}),
+                "0", "0", "0", "N/A"
+            )
 
         # Filtrer les messages
         filtered = filter_messages(messages, start_date, end_date, selected_senders)
@@ -137,26 +178,32 @@ def register_model_callback(app):
         [Input('model-selector', 'value')]
     )
     def update_model(model_name):
-        rag = get_rag_engine()
-        rag.ollama_model = model_name
-        
-        status = rag.check_ollama_status()
-        
-        if status['status'] == 'online':
-            if status['model_available']:
-                return html.Div([
-                    html.Span("●", style={'color': COLORS['secondary'], 'marginRight': '6px', 'fontSize': '0.8rem'}),
-                    html.Span("En ligne", style={'color': COLORS['secondary'], 'fontSize': '0.85rem'})
-                ], style={'display': 'flex', 'alignItems': 'center'})
+        try:
+            rag = get_rag_engine()
+            rag.ollama_model = model_name
+
+            status = rag.check_ollama_status()
+
+            if status['status'] == 'online':
+                if status['model_available']:
+                    return html.Div([
+                        html.Span("●", style={'color': COLORS['secondary'], 'marginRight': '6px', 'fontSize': '0.8rem'}),
+                        html.Span("En ligne", style={'color': COLORS['secondary'], 'fontSize': '0.85rem'})
+                    ], style={'display': 'flex', 'alignItems': 'center'})
+                else:
+                    return html.Div([
+                        html.Span("●", style={'color': COLORS['accent'], 'marginRight': '6px', 'fontSize': '0.8rem'}),
+                        html.Span("Modèle manquant", style={'color': COLORS['accent'], 'fontSize': '0.85rem'})
+                    ], style={'display': 'flex', 'alignItems': 'center'})
             else:
                 return html.Div([
-                    html.Span("●", style={'color': COLORS['accent'], 'marginRight': '6px', 'fontSize': '0.8rem'}),
-                    html.Span("Modèle manquant", style={'color': COLORS['accent'], 'fontSize': '0.85rem'})
+                    html.Span("●", style={'color': '#ef4444', 'marginRight': '6px', 'fontSize': '0.8rem'}),
+                    html.Span("Hors ligne", style={'color': '#ef4444', 'fontSize': '0.85rem'})
                 ], style={'display': 'flex', 'alignItems': 'center'})
-        else:
+        except Exception as e:
             return html.Div([
                 html.Span("●", style={'color': '#ef4444', 'marginRight': '6px', 'fontSize': '0.8rem'}),
-                html.Span("Hors ligne", style={'color': '#ef4444', 'fontSize': '0.85rem'})
+                html.Span(f"Erreur: {str(e)[:30]}", style={'color': '#ef4444', 'fontSize': '0.85rem'})
             ], style={'display': 'flex', 'alignItems': 'center'})
 
 
@@ -178,57 +225,66 @@ def register_chat_callback(app):
     def handle_chat(n_clicks, n_submit, user_input, chat_history, stored_data):
         if not user_input or not user_input.strip():
             raise PreventUpdate
-        
+
         if chat_history is None:
             chat_history = []
-        
+
         # Message utilisateur
         chat_history.append({
             'role': 'user',
             'content': user_input
         })
-        
+
         # Générer la réponse
-        if not stored_data:
-            assistant_response = "⚠️ Veuillez d'abord charger un fichier JSON contenant vos messages."
-        else:
-            rag = get_rag_engine()
-            result = rag.chat(user_input)
-            assistant_response = result['answer']
-            
-            # Ajouter les sources (seulement pour les réponses RAG, pas statistiques)
-            if result.get('sources') and result.get('retrieval_method') != 'statistical_analysis':
-                sources_text = "\n\n---\n📚 **Extraits de conversation utilisés:**\n"
-                for i, src in enumerate(result['sources'][:3], 1):
-                    content = src.get('content', '')
-                    metadata = src.get('metadata', {})
+        try:
+            if not stored_data:
+                assistant_response = "⚠️ Veuillez d'abord charger un fichier JSON contenant vos messages."
+            else:
+                rag = get_rag_engine()
+                result = rag.chat(user_input)
+                assistant_response = result['answer']
+
+                # Ajouter les sources (seulement pour les réponses RAG, pas statistiques)
+                if result.get('sources') and result.get('retrieval_method') != 'statistical_analysis':
+                    sources_text = "\n\n---\n📚 **Extraits de conversation utilisés:**\n"
+                    for i, src in enumerate(result['sources'][:3], 1):
+                        content = src.get('content', '')
+                        metadata = src.get('metadata', {})
                     
-                    # Pour les chunks de fenêtre, utiliser 'senders' au lieu de 'sender_name'
-                    if metadata.get('chunk_type') == 'conversation_window':
-                        senders = metadata.get('senders', 'Inconnu')
-                        start_date = metadata.get('start_date', '')
-                        end_date = metadata.get('end_date', '')
-                        date_info = f"{start_date}" if start_date == end_date else f"{start_date} → {end_date}"
-                        
-                        # Limiter la longueur et nettoyer le contenu
-                        content_preview = content[:200] if len(content) > 200 else content
-                        content_preview = content_preview.replace('\n', ' • ')
-                        
-                        sources_text += f"\n**{i}. Conversation** ({date_info})\n"
-                        sources_text += f"   Participants: {senders}\n"
-                        sources_text += f"   > {content_preview}{'...' if len(content) > 200 else ''}\n"
-                    else:
-                        # Messages individuels
-                        sender = metadata.get('sender_name', 'Inconnu')
-                        date = metadata.get('date', '')
-                        content_preview = content[:150] if len(content) > 150 else content
-                        
-                        sources_text += f"\n**{i}. [{sender}]** ({date})\n"
-                        sources_text += f"   > {content_preview}{'...' if len(content) > 150 else ''}\n"
-                
-                if len(result['sources']) > 0:
-                    assistant_response += sources_text
-        
+                        # Pour les chunks de fenêtre, utiliser 'senders' au lieu de 'sender_name'
+                        if metadata.get('chunk_type') == 'conversation_window':
+                            senders = metadata.get('senders', 'Inconnu')
+                            start_date = metadata.get('start_date', '')
+                            end_date = metadata.get('end_date', '')
+                            date_info = f"{start_date}" if start_date == end_date else f"{start_date} → {end_date}"
+
+                            # Limiter la longueur et nettoyer le contenu
+                            content_preview = content[:200] if len(content) > 200 else content
+                            content_preview = content_preview.replace('\n', ' • ')
+
+                            sources_text += f"\n**{i}. Conversation** ({date_info})\n"
+                            sources_text += f"   Participants: {senders}\n"
+                            sources_text += f"   > {content_preview}{'...' if len(content) > 200 else ''}\n"
+                        else:
+                            # Messages individuels
+                            sender = metadata.get('sender_name', 'Inconnu')
+                            date = metadata.get('date', '')
+                            content_preview = content[:150] if len(content) > 150 else content
+
+                            sources_text += f"\n**{i}. [{sender}]** ({date})\n"
+                            sources_text += f"   > {content_preview}{'...' if len(content) > 150 else ''}\n"
+
+                    if len(result['sources']) > 0:
+                        assistant_response += sources_text
+
+        except ConnectionError:
+            assistant_response = "❌ **Erreur de connexion**\n\nImpossible de contacter le serveur Ollama. Vérifiez que :\n- Ollama est bien démarré (`ollama serve`)\n- L'URL est correcte (par défaut: http://localhost:11434)"
+        except TimeoutError:
+            assistant_response = "⏱️ **Timeout**\n\nLe modèle met trop de temps à répondre. Essayez :\n- Un modèle plus léger (phi3, gemma)\n- Une question plus simple"
+        except Exception as e:
+            error_type = type(e).__name__
+            assistant_response = f"❌ **Erreur ({error_type})**\n\n{str(e)[:200]}\n\nVeuillez réessayer ou reformuler votre question."
+
         # Réponse assistant
         chat_history.append({
             'role': 'assistant',
@@ -297,14 +353,22 @@ def build_chat_display(chat_history: list) -> list:
 
 def register_export_callback(app):
     """Callback pour l'export des données."""
-    
+
     @app.callback(
         Output('download-data', 'data'),
         [Input('export-button', 'n_clicks')],
         [State('stored-data', 'data')]
     )
     def export_data(n_clicks, stored_data):
-        if n_clicks and stored_data:
+        if not n_clicks or not stored_data:
+            raise PreventUpdate
+
+        try:
             messages = pd.read_json(stored_data, orient='split')
             return dcc.send_data_frame(messages.to_csv, "exported_messages.csv")
-        raise PreventUpdate
+        except Exception as e:
+            # En cas d'erreur, on ne peut pas afficher de message dans ce callback
+            # car il retourne seulement des données de téléchargement
+            # L'erreur sera visible dans la console
+            print(f"❌ Erreur lors de l'export: {str(e)}")
+            raise PreventUpdate
