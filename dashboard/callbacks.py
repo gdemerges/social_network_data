@@ -3,6 +3,7 @@ Callbacks du dashboard Dash - Version Dark Theme.
 """
 
 import json
+import uuid
 from dash import html, dcc
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
@@ -13,14 +14,16 @@ import pandas as pd
 from .data_processing import decode_upload_content, process_messages, filter_messages, compute_statistics
 from .styles import COLORS, PLOTLY_LAYOUT, PLOTLY_COLORS
 from rag import get_rag_engine
+from rag.llm_client import get_stream_buffer
 
 
 def register_callbacks(app):
     """Enregistre tous les callbacks de l'application."""
-    
+
     register_data_callback(app)
     register_model_callback(app)
     register_chat_callback(app)
+    register_streaming_callback(app)
     register_export_callback(app)
 
 
@@ -208,13 +211,16 @@ def register_model_callback(app):
 
 
 def register_chat_callback(app):
-    """Callback pour le chat avec l'IA."""
-    
+    """Callback pour le chat avec l'IA (avec streaming)."""
+
     @app.callback(
         [Output('chat-history', 'children'),
          Output('chat-history-store', 'data'),
          Output('chat-input', 'value'),
-         Output('chat-loading-output', 'children')],
+         Output('chat-loading-output', 'children'),
+         Output('streaming-session-id', 'data'),
+         Output('streaming-active', 'data'),
+         Output('streaming-interval', 'disabled')],
         [Input('send-button', 'n_clicks'),
          Input('chat-input', 'n_submit')],
         [State('chat-input', 'value'),
@@ -243,6 +249,10 @@ def register_chat_callback(app):
                 rag = get_rag_engine()
                 result = rag.chat(user_input)
                 assistant_response = result['answer']
+
+                # Indiquer si la réponse vient du cache
+                if result.get('from_cache'):
+                    assistant_response = "⚡ **(Réponse en cache - instantanée)**\n\n" + assistant_response
 
                 # Ajouter les sources (seulement pour les réponses RAG, pas statistiques)
                 if result.get('sources') and result.get('retrieval_method') != 'statistical_analysis':

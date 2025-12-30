@@ -254,6 +254,16 @@ def create_layout() -> html.Div:
             
             # Stores
             dcc.Store(id='chat-history-store', data=[]),
-            
+            dcc.Store(id='streaming-session-id', data=None),
+            dcc.Store(id='streaming-active', data=False),
+
+            # Interval pour le streaming (désactivé par défaut)
+            dcc.Interval(
+                id='streaming-interval',
+                interval=200,  # Mise à jour toutes les 200ms
+                n_intervals=0,
+                disabled=True  # Désactivé par défaut
+            ),
+
         ], fluid=True),
     ], style=PAGE_STYLE)

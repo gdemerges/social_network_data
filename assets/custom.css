@@ -208,3 +208,177 @@ input:focus {
     max-width: 1600px;
     margin: 0 auto;
 }
+
+/* ============================================
+   RESPONSIVE DESIGN - Mobile First
+   ============================================ */
+
+/* Tablettes et petits écrans (max 768px) */
+@media (max-width: 768px) {
+    /* Réduire padding sur mobile */
+    .container-fluid {
+        padding-left: 12px !important;
+        padding-right: 12px !important;
+    }
+
+    /* Cards responsive */
+    .stat-card {
+        margin-bottom: 12px !important;
+    }
+
+    /* Chat messages plus larges sur mobile */
+    .chat-message > div > div {
+        max-width: 90% !important;
+    }
+
+    /* Boutons full width sur mobile */
+    .btn {
+        width: 100%;
+        margin-bottom: 8px;
+    }
+
+    /* Stack les graphiques verticalement */
+    .row > [class*='col-'] {
+        margin-bottom: 16px;
+    }
+
+    /* Réduire taille des titres */
+    h1 {
+        font-size: 1.5rem !important;
+    }
+
+    h2 {
+        font-size: 1.3rem !important;
+    }
+
+    h3 {
+        font-size: 1.1rem !important;
+    }
+
+    /* Input chat plus accessible */
+    #chat-input {
+        font-size: 16px !important; /* Évite le zoom iOS */
+    }
+
+    /* Améliorer touch targets (min 44x44px) */
+    .btn,
+    button,
+    .Select-control {
+        min-height: 44px !important;
+        min-width: 44px !important;
+    }
+
+    /* Chat history height responsive */
+    #chat-history {
+        max-height: 400px !important;
+    }
+}
+
+/* Petits mobiles (max 480px) */
+@media (max-width: 480px) {
+    /* Encore plus compact */
+    .container-fluid {
+        padding-left: 8px !important;
+        padding-right: 8px !important;
+    }
+
+    /* Chat messages encore plus larges */
+    .chat-message > div > div {
+        max-width: 95% !important;
+    }
+
+    /* Réduire padding des cards */
+    .card-body {
+        padding: 12px !important;
+    }
+
+    /* Stats cards en colonne */
+    .stat-card h4 {
+        font-size: 1.5rem !important;
+    }
+
+    /* Header compact */
+    .gradient-header {
+        padding: 12px !important;
+    }
+}
+
+/* Grands écrans (min 1920px) */
+@media (min-width: 1920px) {
+    .container-fluid {
+        max-width: 1800px;
+    }
+
+    /* Augmenter chat history sur grands écrans */
+    #chat-history {
+        max-height: 600px !important;
+    }
+}
+
+/* Print styles */
+@media print {
+    /* Cacher éléments non imprimables */
+    #upload-data,
+    #send-button,
+    #export-button,
+    .gradient-header {
+        display: none !important;
+    }
+
+    /* Fond blanc pour impression */
+    body,
+    .card {
+        background-color: white !important;
+        color: black !important;
+    }
+
+    /* Pas de box-shadow */
+    .card,
+    .stat-card {
+        box-shadow: none !important;
+        border: 1px solid #ccc !important;
+    }
+}
+
+/* Auto-scroll chat container */
+#chat-history {
+    scroll-behavior: smooth;
+}
+
+/* Améliorer lisibilité du chat sur mobile */
+@media (max-width: 768px) {
+    .chat-message {
+        font-size: 0.9rem !important;
+    }
+
+    /* Réduire padding des bulles de chat */
+    .chat-message > div > div > div {
+        padding: 10px 14px !important;
+    }
+}
+
+/* Touch feedback */
+@media (hover: none) {
+    /* Styles pour appareils tactiles uniquement */
+    .btn:active,
+    button:active {
+        opacity: 0.7;
+        transform: scale(0.98);
+    }
+
+    .stat-card:active {
+        transform: scale(0.98);
+    }
+}
+
+/* Orientation landscape sur mobile */
+@media (max-width: 768px) and (orientation: landscape) {
+    #chat-history {
+        max-height: 250px !important;
+    }
+
+    /* Réduire hauteur du header */
+    .gradient-header {
+        padding: 8px !important;
+    }
+}

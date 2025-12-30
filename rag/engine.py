@@ -9,10 +9,11 @@ from typing import Dict, Optional, List
 from .chunking import TextChunker
 from .embeddings import EmbeddingManager
 from .vector_store import VectorStore
-from .llm_client import OllamaClient
+from .llm_client import OllamaClient, get_stream_buffer
 from .retriever import HybridRetriever, BM25Retriever
 from .ingestion import DocumentIngester, DataCleaner
 from .evaluation import RAGEvaluator, quick_evaluate, EvaluationReport
+from .cache import get_query_cache
 
 
 class RAGEngine:
@@ -41,11 +42,12 @@ class RAGEngine:
         use_reranking: bool = True,
         reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
         vector_weight: float = 0.6,
-        bm25_weight: float = 0.4
+        bm25_weight: float = 0.4,
+        use_cache: bool = True
     ):
         """
         Initialise le moteur RAG.
-        
+
         Args:
             ollama_model: Modèle Ollama à utiliser
             ollama_base_url: URL du serveur Ollama
@@ -59,11 +61,13 @@ class RAGEngine:
             reranker_model: Modèle de re-ranking
             vector_weight: Poids recherche vectorielle (0-1)
             bm25_weight: Poids recherche BM25 (0-1)
+            use_cache: Activer le cache des requêtes
         """
         self.use_conversation_windows = use_conversation_windows
         self.window_size = window_size
         self.use_hybrid_search = use_hybrid_search
         self.use_reranking = use_reranking
+        self.use_cache = use_cache
         
         # Composants de base
         self.chunker = TextChunker(
@@ -94,7 +98,10 @@ class RAGEngine:
         
         # Évaluation
         self.evaluator = RAGEvaluator(llm_client=self.llm_client)
-        
+
+        # Cache
+        self.cache = get_query_cache() if use_cache else None
+
         self.messages_df: Optional[pd.DataFrame] = None
         self.indexing_stats: Dict = {}
         self._indexed_documents: List[str] = []
@@ -372,23 +379,33 @@ class RAGEngine:
     def chat(self, question: str, n_context: int = 5) -> Dict:
         """
         Répond à une question en utilisant le RAG.
-        
+
         Args:
             question: La question de l'utilisateur
             n_context: Nombre de chunks de contexte
-            
+
         Returns:
             Dict avec la réponse et les sources
         """
+        # Vérifier le cache d'abord (si activé)
+        if self.cache:
+            cached_result = self.cache.get(question, n_context)
+            if cached_result is not None:
+                # Ajouter une indication que c'est du cache
+                cached_result['from_cache'] = True
+                return cached_result
+
         # Vérifier si c'est une question statistique
         stat_analysis = self._detect_statistical_question(question)
         if stat_analysis:
             answer = self._analyze_statistics(stat_analysis)
-            return {
+            result = {
                 "answer": answer,
                 "sources": [],
-                "retrieval_method": "statistical_analysis"
+                "retrieval_method": "statistical_analysis",
+                "from_cache": False
             }
+            return result
         
         relevant_messages = self.search(question, n_results=n_context)
         
@@ -448,19 +465,140 @@ QUESTION: {question}
 Réponds de manière synthétique et structurée. Ne recopie pas tous les messages, extrais seulement l'information pertinente."""
 
         answer = self.llm_client.generate(user_prompt, system_prompt, max_tokens=3000)
-        
+
         # Déterminer la méthode de retrieval utilisée
         retrieval_method = "hybrid" if self.use_hybrid_search else "vector"
         if self.use_reranking:
             retrieval_method += "+rerank"
-        
-        return {
+
+        result = {
             "answer": answer,
             "sources": relevant_messages,
             "retrieval_method": retrieval_method,
-            "contexts": [msg['content'] for msg in relevant_messages]
+            "contexts": [msg['content'] for msg in relevant_messages],
+            "from_cache": False
         }
-    
+
+        # Mettre en cache le résultat (si activé)
+        if self.cache:
+            self.cache.set(question, result, n_context)
+
+        return result
+
+    def chat_stream(self, question: str, session_id: str, n_context: int = 5):
+        """
+        Répond à une question en utilisant le RAG avec streaming.
+
+        Cette méthode lance la génération en arrière-plan et stocke
+        les tokens dans un buffer accessible via session_id.
+
+        Args:
+            question: La question de l'utilisateur
+            session_id: ID unique de la session de streaming
+            n_context: Nombre de chunks de contexte
+        """
+        def _generate_in_background():
+            """Fonction exécutée en arrière-plan pour générer la réponse."""
+            buffer = get_stream_buffer()
+
+            try:
+                # Vérifier le cache d'abord
+                if self.cache:
+                    cached_result = self.cache.get(question, n_context)
+                    if cached_result is not None:
+                        # Mettre la réponse cachée directement
+                        buffer.append(session_id, "⚡ **(Réponse en cache)**\n\n")
+                        buffer.append(session_id, cached_result['answer'])
+                        buffer.mark_complete(session_id)
+                        return
+
+                # Vérifier questions statistiques
+                stat_analysis = self._detect_statistical_question(question)
+                if stat_analysis:
+                    answer = self._analyze_statistics(stat_analysis)
+                    buffer.append(session_id, answer)
+                    buffer.mark_complete(session_id)
+                    return
+
+                # Recherche normale
+                relevant_messages = self.search(question, n_results=n_context)
+
+                if not relevant_messages:
+                    buffer.append(session_id, "Je n'ai pas encore de messages indexés.")
+                    buffer.mark_complete(session_id)
+                    return
+
+                # Préparer le contexte
+                context_parts = []
+                for i, msg in enumerate(relevant_messages, 1):
+                    metadata = msg['metadata']
+                    content = msg['content']
+
+                    if metadata.get('chunk_type') == 'conversation_window':
+                        senders = metadata.get('senders', 'Inconnu')
+                        context_parts.append(f"--- Extrait {i} (Participants: {senders}) ---\n{content}")
+                    else:
+                        sender = metadata.get('sender_name', 'Inconnu')
+                        context_parts.append(f"[{sender}]: {content}")
+
+                context = "\n\n".join(context_parts)
+
+                # Prompts
+                system_prompt = """Tu es un assistant qui analyse des conversations de messagerie.
+Tu réponds toujours en français.
+
+RÈGLES STRICTES:
+1. Base-toi UNIQUEMENT sur les messages fournis dans le contexte
+2. Fais TRÈS attention à QUI dit QUOI - ne confonds JAMAIS les personnes
+3. Cite EXACTEMENT les passages pertinents avec le nom de la personne qui parle
+4. Si une information n'est pas claire ou absente, dis-le explicitement
+5. Ne fais AUCUNE inférence ou supposition au-delà de ce qui est écrit
+6. Réponds de manière claire et structurée"""
+
+                user_prompt = f"""Voici des extraits de conversation pertinents pour répondre à la question.
+
+EXTRAITS:
+{context}
+
+QUESTION: {question}
+
+Réponds de manière synthétique et structurée."""
+
+                # Générer avec streaming
+                for token in self.llm_client.generate_stream(
+                    user_prompt,
+                    system_prompt,
+                    max_tokens=3000
+                ):
+                    buffer.append(session_id, token)
+
+                # Marquer comme terminé
+                buffer.mark_complete(session_id)
+
+                # Mettre en cache la réponse complète
+                if self.cache:
+                    buffer_state = buffer.get(session_id)
+                    if buffer_state:
+                        result = {
+                            "answer": buffer_state['content'],
+                            "sources": relevant_messages,
+                            "retrieval_method": "hybrid" if self.use_hybrid_search else "vector",
+                            "contexts": [msg['content'] for msg in relevant_messages],
+                            "from_cache": False
+                        }
+                        self.cache.set(question, result, n_context)
+
+            except Exception as e:
+                buffer.set_error(session_id, f"Erreur: {str(e)}")
+
+        # Créer le buffer et lancer en arrière-plan
+        buffer = get_stream_buffer()
+        buffer.create(session_id)
+
+        # Lancer la génération dans un thread séparé
+        thread = threading.Thread(target=_generate_in_background, daemon=True)
+        thread.start()
+
     def evaluate(
         self,
         questions: List[str],
@@ -535,11 +673,17 @@ Réponds de manière synthétique et structurée. Ne recopie pas tous les messag
             "window_size": self.window_size if self.use_conversation_windows else None,
             "hybrid_search": self.use_hybrid_search,
             "reranking": self.use_reranking,
+            "cache_enabled": self.use_cache,
         }
-        
+
         if self.indexing_stats:
             stats.update(self.indexing_stats)
-        
+
+        # Ajouter stats du cache si activé
+        if self.cache:
+            cache_stats = self.cache.get_stats()
+            stats['cache_stats'] = cache_stats
+
         return stats
     
     def check_ollama_status(self) -> Dict:
