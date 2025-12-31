@@ -26,7 +26,7 @@ def register_callbacks(app):
     register_data_callback(app)
     register_model_callback(app)
     register_chat_callback(app)
-    register_streaming_callback(app)
+    # register_streaming_callback(app)  # TODO: À implémenter (voir STREAMING_SETUP.md)
     register_config_callback(app)
     register_analytics_callback(app)
     register_export_callback(app)
