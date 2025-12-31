@@ -149,6 +149,100 @@ def create_graphs_section() -> dbc.Row:
     ])
 
 
+def create_analytics_section() -> html.Div:
+    """Crée la section d'analytics avancées."""
+    return html.Div([
+        # Header avec toggle
+        dbc.Row([
+            dbc.Col([
+                html.Div([
+                    html.Span("📊", style={'marginRight': '10px', 'fontSize': '1.5rem'}),
+                    html.Span("Analytics Avancées", style={'fontWeight': '600', 'fontSize': '1.2rem', 'color': COLORS['text']}),
+                ], style={'display': 'flex', 'alignItems': 'center'}),
+            ]),
+            dbc.Col([
+                dbc.Button(
+                    "Afficher/Masquer",
+                    id="toggle-analytics",
+                    size="sm",
+                    style={'backgroundColor': COLORS['card_hover'], 'border': 'none'}
+                )
+            ], width='auto'),
+        ], className='mb-3', align='center'),
+
+        # Zone analytics (collapsible)
+        dbc.Collapse(
+            id="analytics-collapse",
+            is_open=False,
+            children=[
+                dbc.Row([
+                    # Word Cloud
+                    dbc.Col([
+                        html.Div([
+                            html.Div([
+                                html.Span("☁️", style={'marginRight': '10px'}),
+                                "Mots les plus fréquents"
+                            ], style={**CARD_HEADER_STYLE, 'marginBottom': '15px'}),
+                            dcc.Graph(
+                                id='wordcloud-graph',
+                                config={'displayModeBar': False},
+                                style={'height': '300px'}
+                            ),
+                        ], style=GRAPH_CARD_STYLE)
+                    ], width=12, lg=6, className='mb-4'),
+
+                    # Topics
+                    dbc.Col([
+                        html.Div([
+                            html.Div([
+                                html.Span("🏷️", style={'marginRight': '10px'}),
+                                "Topics détectés"
+                            ], style={**CARD_HEADER_STYLE, 'marginBottom': '15px'}),
+                            dcc.Graph(
+                                id='topics-graph',
+                                config={'displayModeBar': False},
+                                style={'height': '300px'}
+                            ),
+                        ], style=GRAPH_CARD_STYLE)
+                    ], width=12, lg=6, className='mb-4'),
+                ]),
+
+                dbc.Row([
+                    # Network Graph
+                    dbc.Col([
+                        html.Div([
+                            html.Div([
+                                html.Span("🕸️", style={'marginRight': '10px'}),
+                                "Réseau d'interactions"
+                            ], style={**CARD_HEADER_STYLE, 'marginBottom': '15px'}),
+                            dcc.Graph(
+                                id='network-graph',
+                                config={'displayModeBar': False},
+                                style={'height': '400px'}
+                            ),
+                        ], style=GRAPH_CARD_STYLE)
+                    ], width=12, lg=6, className='mb-4'),
+
+                    # Activity Heatmap
+                    dbc.Col([
+                        html.Div([
+                            html.Div([
+                                html.Span("🔥", style={'marginRight': '10px'}),
+                                "Activité (Jour × Heure)"
+                            ], style={**CARD_HEADER_STYLE, 'marginBottom': '15px'}),
+                            dcc.Graph(
+                                id='heatmap-graph',
+                                config={'displayModeBar': False},
+                                style={'height': '400px'}
+                            ),
+                        ], style=GRAPH_CARD_STYLE)
+                    ], width=12, lg=6, className='mb-4'),
+                ]),
+            ]
+        ),
+    ], style=CARD_STYLE)
+
+
 def create_chat_section() -> html.Div:
     """Crée la section de chat avec l'IA."""
     return html.Div([
@@ -225,6 +319,93 @@ def create_chat_section() -> html.Div:
     ], style=CARD_STYLE)
 
 
+def create_config_section() -> html.Div:
+    """Crée la section de configuration RAG."""
+    return html.Div([
+        # Header avec toggle
+        dbc.Row([
+            dbc.Col([
+                html.Div([
+                    html.Span("⚙️", style={'marginRight': '10px', 'fontSize': '1.3rem'}),
+                    html.Span("Configuration RAG", style={'fontWeight': '600', 'fontSize': '1.1rem', 'color': COLORS['text']}),
+                ], style={'display': 'flex', 'alignItems': 'center'}),
+            ]),
+            dbc.Col([
+                dbc.Button(
+                    "Afficher/Masquer",
+                    id="toggle-config",
+                    size="sm",
+                    style={'backgroundColor': COLORS['card_hover'], 'border': 'none'}
+                )
+            ], width='auto'),
+        ], className='mb-3', align='center'),
+
+        # Zone de configuration (collapsible)
+        dbc.Collapse(
+            id="config-collapse",
+            is_open=False,
+            children=[
+                dbc.Row([
+                    # Cache
+                    dbc.Col([
+                        html.Label("💾 Cache", style={'color': COLORS['text'], 'fontWeight': '500', 'marginBottom': '8px'}),
+                        dbc.Checklist(
+                            id='config-cache-enabled',
+                            options=[{'label': ' Activer le cache (TTL: 1h)', 'value': 'enabled'}],
+                            value=['enabled'],
+                            switch=True,
+                            style={'color': COLORS['text']}
+                        ),
+                    ], width=12, lg=6, className='mb-3'),
+
+                    # Nombre de contextes
+                    dbc.Col([
+                        html.Label("📄 Nombre de contextes", style={'color': COLORS['text'], 'fontWeight': '500', 'marginBottom': '8px'}),
+                        dcc.Slider(
+                            id='config-n-context',
+                            min=1,
+                            max=10,
+                            step=1,
+                            value=5,
+                            marks={i: str(i) for i in range(1, 11)},
+                            tooltip={"placement": "bottom", "always_visible": False}
+                        ),
+                    ], width=12, lg=6, className='mb-3'),
+                ]),
+
+                dbc.Row([
+                    # Recherche hybride
+                    dbc.Col([
+                        html.Label("🔍 Recherche Hybride", style={'color': COLORS['text'], 'fontWeight': '500', 'marginBottom': '8px'}),
+                        dbc.Checklist(
+                            id='config-hybrid-search',
+                            options=[{'label': ' Vector + BM25', 'value': 'enabled'}],
+                            value=['enabled'],
+                            switch=True,
+                            style={'color': COLORS['text']}
+                        ),
+                    ], width=12, lg=6, className='mb-3'),
+
+                    # Re-ranking
+                    dbc.Col([
+                        html.Label("🎯 Re-ranking", style={'color': COLORS['text'], 'fontWeight': '500', 'marginBottom': '8px'}),
+                        dbc.Checklist(
+                            id='config-reranking',
+                            options=[{'label': ' Cross-encoder', 'value': 'enabled'}],
+                            value=['enabled'],
+                            switch=True,
+                            style={'color': COLORS['text']}
+                        ),
+                    ], width=12, lg=6, className='mb-3'),
+                ]),
+
+                # Stats du cache
+                html.Div(id='cache-stats-display', className='mt-3'),
+            ]
+        ),
+    ], style=CARD_STYLE)
+
+
 def create_export_section() -> html.Div:
     """Crée la section d'export."""
     return html.Div([
@@ -249,7 +430,11 @@ def create_layout() -> html.Div:
             html.Div(style={'height': '30px'}),
             create_graphs_section(),
             html.Div(style={'height': '30px'}),
+            create_analytics_section(),
+            html.Div(style={'height': '30px'}),
             create_chat_section(),
+            html.Div(style={'height': '20px'}),
+            create_config_section(),
             create_export_section(),
             
             # Stores

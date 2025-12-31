@@ -10,11 +10,14 @@ from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import plotly.express as px
 import pandas as pd
+from flask import request
 
 from .data_processing import decode_upload_content, process_messages, filter_messages, compute_statistics
 from .styles import COLORS, PLOTLY_LAYOUT, PLOTLY_COLORS
 from rag import get_rag_engine
 from rag.llm_client import get_stream_buffer
+from rag.rate_limiter import get_rate_limiter
+from analytics import get_analytics
 
 
 def register_callbacks(app):
@@ -24,6 +27,8 @@ def register_callbacks(app):
     register_model_callback(app)
     register_chat_callback(app)
     register_streaming_callback(app)
+    register_config_callback(app)
+    register_analytics_callback(app)
     register_export_callback(app)
 
 
@@ -235,6 +240,18 @@ def register_chat_callback(app):
         if chat_history is None:
             chat_history = []
 
+        # Vérifier le rate limiting
+        rate_limiter = get_rate_limiter()
+        client_ip = request.remote_addr if request else "unknown"
+        allowed, error_msg = rate_limiter.is_allowed(client_ip)
+
+        if not allowed:
+            # Rate limit dépassé
+            chat_history.append({'role': 'user', 'content': user_input})
+            chat_history.append({'role': 'assistant', 'content': error_msg})
+            chat_display = build_chat_display(chat_history)
+            return chat_display, chat_history, '', None
+
         # Message utilisateur
         chat_history.append({
             'role': 'user',
@@ -249,6 +266,9 @@ def register_chat_callback(app):
                 rag = get_rag_engine()
                 result = rag.chat(user_input)
                 assistant_response = result['answer']
+
+                # Enregistrer le succès pour le circuit breaker
+                rate_limiter.record_success()
 
                 # Indiquer si la réponse vient du cache
                 if result.get('from_cache'):
@@ -288,10 +308,14 @@ def register_chat_callback(app):
                         assistant_response += sources_text
 
         except ConnectionError:
+            # Enregistrer l'échec pour le circuit breaker
+            rate_limiter.record_failure()
             assistant_response = "❌ **Erreur de connexion**\n\nImpossible de contacter le serveur Ollama. Vérifiez que :\n- Ollama est bien démarré (`ollama serve`)\n- L'URL est correcte (par défaut: http://localhost:11434)"
         except TimeoutError:
+            rate_limiter.record_failure()
             assistant_response = "⏱️ **Timeout**\n\nLe modèle met trop de temps à répondre. Essayez :\n- Un modèle plus léger (phi3, gemma)\n- Une question plus simple"
         except Exception as e:
+            rate_limiter.record_failure()
             error_type = type(e).__name__
             assistant_response = f"❌ **Erreur ({error_type})**\n\n{str(e)[:200]}\n\nVeuillez réessayer ou reformuler votre question."
 
@@ -359,6 +383,346 @@ def build_chat_display(chat_history: list) -> list:
             )
     
     return chat_display
+
+
+def register_config_callback(app):
+    """Callbacks pour la configuration RAG."""
+
+    @app.callback(
+        Output("config-collapse", "is_open"),
+        [Input("toggle-config", "n_clicks")],
+        [State("config-collapse", "is_open")],
+    )
+    def toggle_config(n, is_open):
+        if n:
+            return not is_open
+        return is_open
+
+    @app.callback(
+        Output('cache-stats-display', 'children'),
+        [Input('config-cache-enabled', 'value'),
+         Input('chat-history-store', 'data')]
+    )
+    def update_cache_stats(cache_enabled, chat_history):
+        """Affiche les stats du cache."""
+        rag = get_rag_engine()
+        stats = rag.get_stats()
+
+        if 'cache_stats' not in stats:
+            return html.Div()
+
+        cache_stats = stats['cache_stats']
+        hit_rate = cache_stats.get('hit_rate', 0)
+        hits = cache_stats.get('hits', 0)
+        misses = cache_stats.get('misses', 0)
+        size = cache_stats.get('size', 0)
+
+        # Couleur selon le hit rate
+        if hit_rate > 70:
+            color = COLORS['secondary']  # Vert
+        elif hit_rate > 40:
+            color = COLORS['accent']  # Orange
+        else:
+            color = COLORS['text_muted']  # Gris
+
+        return html.Div([
+            html.Div([
+                html.Span("📊 Stats du Cache", style={'fontWeight': '600', 'color': COLORS['text'], 'marginRight': '15px'}),
+                html.Span(f"Hit Rate: {hit_rate}%", style={'color': color, 'fontWeight': '500', 'marginRight': '15px'}),
+                html.Span(f"Hits: {hits}", style={'color': COLORS['text_muted'], 'marginRight': '15px'}),
+                html.Span(f"Misses: {misses}", style={'color': COLORS['text_muted'], 'marginRight': '15px'}),
+                html.Span(f"Taille: {size}", style={'color': COLORS['text_muted']}),
+            ], style={
+                'padding': '12px',
+                'backgroundColor': COLORS['card_bg'],
+                'borderRadius': '8px',
+                'border': f'1px solid {COLORS["border"]}'
+            })
+        ])
+
+    @app.callback(
+        Output('rag-status', 'children', allow_duplicate=True),
+        [Input('config-cache-enabled', 'value'),
+         Input('config-n-context', 'value'),
+         Input('config-hybrid-search', 'value'),
+         Input('config-reranking', 'value')],
+        prevent_initial_call=True
+    )
+    def update_rag_config(cache_enabled, n_context, hybrid_enabled, rerank_enabled):
+        """Applique la configuration au RAG."""
+        rag = get_rag_engine()
+
+        # Appliquer les configs
+        rag.use_cache = 'enabled' in (cache_enabled or [])
+        rag.use_hybrid_search = 'enabled' in (hybrid_enabled or [])
+        rag.use_reranking = 'enabled' in (rerank_enabled or [])
+
+        # Retourner un statut (on garde le précédent badge)
+        raise PreventUpdate
+
+
+def register_analytics_callback(app):
+    """Callbacks pour les analytics avancées."""
+
+    # Toggle de la collapse
+    @app.callback(
+        Output('analytics-collapse', 'is_open'),
+        [Input('toggle-analytics', 'n_clicks')],
+        [State('analytics-collapse', 'is_open')]
+    )
+    def toggle_analytics(n_clicks, is_open):
+        if n_clicks:
+            return not is_open
+        return is_open
+
+    # Mise à jour des graphiques analytics
+    @app.callback(
+        [Output('wordcloud-graph', 'figure'),
+         Output('topics-graph', 'figure'),
+         Output('network-graph', 'figure'),
+         Output('heatmap-graph', 'figure')],
+        [Input('stored-data', 'data'),
+         Input('sender-dropdown', 'value'),
+         Input('date-picker-range', 'start_date'),
+         Input('date-picker-range', 'end_date')]
+    )
+    def update_analytics(stored_data, selected_senders, start_date, end_date):
+        if not stored_data:
+            # Retourner graphiques vides
+            empty_fig = apply_dark_theme(px.scatter())
+            return empty_fig, empty_fig, empty_fig, empty_fig
+
+        try:
+            # Charger et filtrer les données
+            df = pd.read_json(stored_data, orient='split')
+            df = filter_messages(df, start_date, end_date, selected_senders)
+
+            analytics = get_analytics()
+
+            # 1. Word Cloud (scatter plot avec tailles)
+            wordcloud_data = analytics.compute_word_cloud_data(df, top_n=50)
+
+            if wordcloud_data:
+                import plotly.graph_objects as go
+
+                # Créer positions aléatoires mais déterministes
+                import random
+                random.seed(42)  # Pour reproductibilité
+
+                words = [item['word'] for item in wordcloud_data]
+                frequencies = [item['frequency'] for item in wordcloud_data]
+                sizes = [item['size'] for item in wordcloud_data]
+
+                # Positions aléatoires
+                x_pos = [random.uniform(0, 100) for _ in words]
+                y_pos = [random.uniform(0, 100) for _ in words]
+
+                wordcloud_fig = go.Figure()
+                wordcloud_fig.add_trace(go.Scatter(
+                    x=x_pos,
+                    y=y_pos,
+                    mode='text',
+                    text=words,
+                    textfont=dict(
+                        size=sizes,
+                        color=[PLOTLY_COLORS[i % len(PLOTLY_COLORS)] for i in range(len(words))]
+                    ),
+                    hovertemplate='<b>%{text}</b><br>Fréquence: %{customdata}<extra></extra>',
+                    customdata=frequencies
+                ))
+
+                wordcloud_fig.update_layout(
+                    **PLOTLY_LAYOUT,
+                    xaxis=dict(visible=False, range=[0, 100]),
+                    yaxis=dict(visible=False, range=[0, 100]),
+                    hovermode='closest',
+                    margin=dict(l=0, r=0, t=0, b=0)
+                )
+            else:
+                wordcloud_fig = apply_dark_theme(px.scatter())
+                wordcloud_fig.update_layout(
+                    annotations=[{
+                        'text': 'Pas assez de données',
+                        'xref': 'paper',
+                        'yref': 'paper',
+                        'showarrow': False,
+                        'font': {'size': 16, 'color': COLORS['text_muted']}
+                    }]
+                )
+
+            # 2. Topics (barres horizontales)
+            topics = analytics.compute_topic_distribution(df, n_topics=5, keywords_per_topic=5)
+
+            if topics:
+                import plotly.graph_objects as go
+
+                topics_fig = go.Figure()
+
+                for topic in topics:
+                    keywords_str = ', '.join(topic['keywords'][:3])  # Top 3 mots
+                    topics_fig.add_trace(go.Bar(
+                        y=[f"Topic {topic['topic_id']}: {keywords_str}"],
+                        x=[topic['weight']],
+                        orientation='h',
+                        marker=dict(color=PLOTLY_COLORS[topic['topic_id'] % len(PLOTLY_COLORS)]),
+                        hovertemplate=f"<b>Topic {topic['topic_id']}</b><br>" +
+                                     f"Mots-clés: {', '.join(topic['keywords'])}<br>" +
+                                     f"Poids: {topic['weight']:.2%}<extra></extra>"
+                    ))
+
+                topics_fig.update_layout(
+                    **PLOTLY_LAYOUT,
+                    showlegend=False,
+                    xaxis_title="Poids",
+                    yaxis=dict(autorange='reversed'),
+                    margin=dict(l=200, r=20, t=20, b=40)
+                )
+            else:
+                topics_fig = apply_dark_theme(px.bar())
+                topics_fig.update_layout(
+                    annotations=[{
+                        'text': 'Pas assez de données',
+                        'xref': 'paper',
+                        'yref': 'paper',
+                        'showarrow': False,
+                        'font': {'size': 16, 'color': COLORS['text_muted']}
+                    }]
+                )
+
+            # 3. Network Graph
+            network = analytics.compute_interaction_network(df, time_window_minutes=5)
+
+            if network['nodes'] and network['edges']:
+                import plotly.graph_objects as go
+                import networkx as nx
+
+                # Créer graphe NetworkX pour layout
+                G = nx.Graph()
+                for node in network['nodes']:
+                    G.add_node(node['id'], **node)
+                for edge in network['edges']:
+                    G.add_edge(edge['source'], edge['target'], weight=edge['weight'])
+
+                # Layout spring
+                pos = nx.spring_layout(G, seed=42)
+
+                # Edges
+                edge_x = []
+                edge_y = []
+                edge_weights = []
+                for edge in network['edges']:
+                    x0, y0 = pos[edge['source']]
+                    x1, y1 = pos[edge['target']]
+                    edge_x.extend([x0, x1, None])
+                    edge_y.extend([y0, y1, None])
+                    edge_weights.append(edge['weight'])
+
+                edge_trace = go.Scatter(
+                    x=edge_x, y=edge_y,
+                    line=dict(width=2, color=COLORS['text_muted']),
+                    hoverinfo='none',
+                    mode='lines'
+                )
+
+                # Nodes
+                node_x = []
+                node_y = []
+                node_text = []
+                node_size = []
+                node_hover = []
+
+                for node in network['nodes']:
+                    x, y = pos[node['id']]
+                    node_x.append(x)
+                    node_y.append(y)
+                    node_text.append(node['label'])
+                    node_size.append(min(node['messages'] * 3, 50))  # Limite taille
+                    node_hover.append(f"<b>{node['label']}</b><br>{node['messages']} messages")
+
+                node_trace = go.Scatter(
+                    x=node_x, y=node_y,
+                    mode='markers+text',
+                    text=node_text,
+                    textposition='top center',
+                    marker=dict(
+                        size=node_size,
+                        color=PLOTLY_COLORS[0],
+                        line=dict(width=2, color=COLORS['bg'])
+                    ),
+                    hovertemplate='%{customdata}<extra></extra>',
+                    customdata=node_hover,
+                    textfont=dict(color=COLORS['text'])
+                )
+
+                network_fig = go.Figure(data=[edge_trace, node_trace])
+                network_fig.update_layout(
+                    **PLOTLY_LAYOUT,
+                    showlegend=False,
+                    xaxis=dict(visible=False),
+                    yaxis=dict(visible=False),
+                    hovermode='closest',
+                    margin=dict(l=0, r=0, t=0, b=0)
+                )
+            else:
+                network_fig = apply_dark_theme(px.scatter())
+                network_fig.update_layout(
+                    annotations=[{
+                        'text': 'Pas assez d\'interactions détectées',
+                        'xref': 'paper',
+                        'yref': 'paper',
+                        'showarrow': False,
+                        'font': {'size': 16, 'color': COLORS['text_muted']}
+                    }]
+                )
+
+            # 4. Activity Heatmap
+            heatmap_data = analytics.compute_activity_heatmap(df)
+
+            if heatmap_data['data']:
+                import plotly.graph_objects as go
+
+                heatmap_fig = go.Figure(data=go.Heatmap(
+                    z=heatmap_data['data'],
+                    x=heatmap_data['hours'],
+                    y=heatmap_data['days'],
+                    colorscale='Viridis',
+                    hovertemplate='%{y}<br>%{x}h: %{z} messages<extra></extra>',
+                    colorbar=dict(
+                        title='Messages',
+                        tickfont=dict(color=COLORS['text'])
+                    )
+                ))
+
+                heatmap_fig.update_layout(
+                    **PLOTLY_LAYOUT,
+                    xaxis_title='Heure',
+                    yaxis_title='Jour',
+                    xaxis=dict(
+                        tickmode='linear',
+                        tick0=0,
+                        dtick=2,
+                        gridcolor=COLORS['border']
+                    ),
+                    yaxis=dict(gridcolor=COLORS['border'])
+                )
+            else:
+                heatmap_fig = apply_dark_theme(px.imshow([[0]]))
+                heatmap_fig.update_layout(
+                    annotations=[{
+                        'text': 'Pas assez de données temporelles',
+                        'xref': 'paper',
+                        'yref': 'paper',
+                        'showarrow': False,
+                        'font': {'size': 16, 'color': COLORS['text_muted']}
+                    }]
+                )
+
+            return wordcloud_fig, topics_fig, network_fig, heatmap_fig
+
+        except Exception as e:
+            print(f"❌ Erreur analytics: {str(e)}")
+            empty_fig = apply_dark_theme(px.scatter())
+            return empty_fig, empty_fig, empty_fig, empty_fig
 
 
 def register_export_callback(app):
